@@ -1,11 +1,13 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, jsonify, g
-from flask_cors import CORS
 import os
+from urllib.parse import urlparse
+
 import psycopg2
 import psycopg2.extras
+from flask import Flask, jsonify, g
+from flask_cors import CORS
 
 from auth_middleware import token_required
 from auth_blueprint import authentication_blueprint
@@ -13,12 +15,13 @@ from items_blueprint import items_blueprint
 from comments_blueprint import comments_blueprint
 
 # ------------------------------------------------
-# CREATE APP FIRST
+# CREATE APP
 # ------------------------------------------------
 app = Flask(__name__)
 
 # ------------------------------------------------
-# CORS (Vite dev servers)
+# CORS (Local dev for Vite)
+# We'll add your Netlify URL later after deployment.
 # ------------------------------------------------
 CORS(
     app,
@@ -44,8 +47,24 @@ app.register_blueprint(comments_blueprint)
 
 # ------------------------------------------------
 # DB CONNECTION
+# - Uses Heroku DATABASE_URL if available
+# - Falls back to local Postgres env vars
 # ------------------------------------------------
 def get_db_connection():
+    database_url = os.getenv("DATABASE_URL")
+
+    # Production / Heroku
+    if database_url:
+        result = urlparse(database_url)
+        return psycopg2.connect(
+            host=result.hostname,
+            database=result.path[1:],  # strip leading "/"
+            user=result.username,
+            password=result.password,
+            port=result.port,
+        )
+
+    # Local development
     return psycopg2.connect(
         host="localhost",
         database=os.getenv("POSTGRES_DATABASE"),
@@ -73,7 +92,6 @@ def users_index():
 @app.route("/users/<user_id>", methods=["GET"])
 @token_required
 def users_show(user_id):
-
     if int(user_id) != g.user["id"]:
         return jsonify({"err": "Unauthorized"}), 403
 
@@ -94,8 +112,11 @@ def users_show(user_id):
 
 # ------------------------------------------------
 # RUN SERVER
+# Heroku sets PORT automatically
 # ------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.getenv("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)
+
 
 
