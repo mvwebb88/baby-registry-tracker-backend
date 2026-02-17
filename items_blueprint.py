@@ -12,30 +12,56 @@ items_blueprint = Blueprint("items_blueprint", __name__)
 # ============================================================
 # ITEMS API
 #
-# Heroku DB tables (based on what you created):
-#   users:    id, username, password_digest, created_at
-#   items:    id, name, description, image_url, user_id, created_at
+# This version supports:
+# - JSON requests (fetch with JSON body)
+# - FormData requests (multipart/form-data), common when a form includes a file input
+#
+# DB tables (Heroku):
+#   users: id, username, password_digest, created_at
+#   items: id, name, description, image_url, user_id, created_at
 #   comments: id, comment_text, user_id, item_id, created_at
 #
-# Notes:
-# - We keep consolidate_comments_in_hoots() to match the original pattern.
-# - We return BOTH "name" and "item_name" for compatibility.
-# - due_date is removed because it is NOT in your current items table.
+# IMPORTANT:
+# - DB column is "name" (not "item_name")
+# - Frontend may still send "item_name"
+#   => we accept BOTH and return BOTH to keep frontend stable
 # ============================================================
 
 
 # -------------------------
-# CREATE ITEM
+# Helper: read input (JSON or FormData)
+# -------------------------
+def _get_request_data():
+    """
+    Returns a dict of input fields regardless of JSON vs FormData.
+    Accepts both 'name' and legacy 'item_name'.
+    """
+    # If multipart/form-data (common when file input exists)
+    content_type = request.content_type or ""
+
+    if "multipart/form-data" in content_type:
+        name = request.form.get("name") or request.form.get("item_name")
+        description = request.form.get("description")
+        image_url = request.form.get("image_url")
+        return {"name": name, "description": description, "image_url": image_url}
+
+    # Otherwise assume JSON
+    data = request.get_json(silent=True) or {}
+    name = data.get("name") or data.get("item_name")
+    description = data.get("description")
+    image_url = data.get("image_url")
+    return {"name": name, "description": description, "image_url": image_url}
+
+
+# -------------------------
+# CREATE ITEM (JSON or FormData)
 # -------------------------
 @items_blueprint.route("/items", methods=["POST"])
 @token_required
 def create_item():
     try:
-        # Accept JSON now (FormData later if you add file uploads)
-        data = request.get_json(silent=True) or {}
-
-        # support either key from frontend
-        name = data.get("name") or data.get("item_name")
+        data = _get_request_data()
+        name = data.get("name")
         description = data.get("description")
         image_url = data.get("image_url")
 
@@ -49,12 +75,13 @@ def create_item():
 
         cursor.execute(
             """
-            INSERT INTO items (name, description, user_id, created_at, image_url)
+            INSERT INTO items (name, description, image_url, user_id, created_at)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id;
             """,
-            (name, description, user_id, datetime.utcnow(), image_url),
+            (name, description, image_url, user_id, datetime.utcnow()),
         )
+
         item_id = cursor.fetchone()["id"]
 
         cursor.execute(
@@ -62,7 +89,7 @@ def create_item():
             SELECT
               i.id,
               i.name,
-              i.name AS item_name, -- compatibility for any old frontend usage
+              i.name AS item_name,
               i.description,
               i.image_url,
               i.created_at,
@@ -99,7 +126,7 @@ def items_index():
             SELECT
               i.id,
               i.name,
-              i.name AS item_name, -- compatibility
+              i.name AS item_name,
               i.description,
               i.image_url,
               i.created_at,
@@ -143,7 +170,7 @@ def show_item(item_id):
             SELECT
               i.id,
               i.name,
-              i.name AS item_name, -- compatibility
+              i.name AS item_name,
               i.description,
               i.image_url,
               i.created_at,
@@ -179,15 +206,14 @@ def show_item(item_id):
 
 
 # -------------------------
-# UPDATE ITEM
+# UPDATE ITEM (JSON or FormData)
 # -------------------------
 @items_blueprint.route("/items/<item_id>", methods=["PUT"])
 @token_required
 def update_item(item_id):
     try:
-        data = request.get_json(silent=True) or {}
-
-        name = data.get("name") or data.get("item_name")
+        data = _get_request_data()
+        name = data.get("name")
         description = data.get("description")
         image_url = data.get("image_url")
 
@@ -226,7 +252,7 @@ def update_item(item_id):
             SELECT
               i.id,
               i.name,
-              i.name AS item_name, -- compatibility
+              i.name AS item_name,
               i.description,
               i.image_url,
               i.created_at,
@@ -275,10 +301,12 @@ def delete_item(item_id):
         connection.commit()
         connection.close()
 
+        # return deleted item info (optional)
         return jsonify(item), 200
 
     except Exception as error:
         return jsonify({"error": str(error)}), 500
+
 
 
 
