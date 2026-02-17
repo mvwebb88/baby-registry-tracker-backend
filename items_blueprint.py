@@ -10,41 +10,37 @@ from db_helpers import get_db_connection, consolidate_comments_in_hoots
 items_blueprint = Blueprint("items_blueprint", __name__)
 
 # ============================================================
-# ITEMS API (JSON now, FormData later for images)
+# ITEMS API
 #
-# DB tables:
-#   items: id, item_name, description, user_id, created_at, image_url, due_date
-#   comments: id, text, item_id, user_id, created_at
+# Heroku DB tables (based on what you created):
+#   users:    id, username, password_digest, created_at
+#   items:    id, name, description, image_url, user_id, created_at
+#   comments: id, comment_text, user_id, item_id, created_at
 #
 # Notes:
-# - We are reusing consolidate_comments_in_hoots() to keep the project close
-#   to the hoots example (it just "consolidates comments into a list").
+# - We keep consolidate_comments_in_hoots() to match the original pattern.
+# - We return BOTH "name" and "item_name" for compatibility.
+# - due_date is removed because it is NOT in your current items table.
 # ============================================================
 
 
 # -------------------------
-# CREATE ITEM (JSON or FormData)
+# CREATE ITEM
 # -------------------------
 @items_blueprint.route("/items", methods=["POST"])
 @token_required
 def create_item():
     try:
-        # JSON (example-style)
-        if request.is_json:
-            data = request.get_json(silent=True) or {}
-            item_name = data.get("item_name")
-            description = data.get("description")
-            due_date = data.get("due_date")  # expects "YYYY-MM-DD" or None
-            image_url = data.get("image_url")  # optional string for now
-        else:
-            # FormData (later when you add image uploads)
-            item_name = request.form.get("item_name")
-            description = request.form.get("description")
-            due_date = request.form.get("due_date")
-            image_url = request.form.get("image_url")
+        # Accept JSON now (FormData later if you add file uploads)
+        data = request.get_json(silent=True) or {}
 
-        if not item_name or not description:
-            return jsonify({"error": "item_name and description are required"}), 400
+        # support either key from frontend
+        name = data.get("name") or data.get("item_name")
+        description = data.get("description")
+        image_url = data.get("image_url")
+
+        if not name or not description:
+            return jsonify({"error": "name and description are required"}), 400
 
         user_id = g.user["id"]
 
@@ -53,11 +49,11 @@ def create_item():
 
         cursor.execute(
             """
-            INSERT INTO items (item_name, description, user_id, created_at, image_url, due_date)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO items (name, description, user_id, created_at, image_url)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING id;
             """,
-            (item_name, description, user_id, datetime.utcnow(), image_url, due_date),
+            (name, description, user_id, datetime.utcnow(), image_url),
         )
         item_id = cursor.fetchone()["id"]
 
@@ -65,10 +61,10 @@ def create_item():
             """
             SELECT
               i.id,
-              i.item_name,
+              i.name,
+              i.name AS item_name, -- compatibility for any old frontend usage
               i.description,
               i.image_url,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -102,16 +98,16 @@ def items_index():
             """
             SELECT
               i.id,
-              i.item_name,
+              i.name,
+              i.name AS item_name, -- compatibility
               i.description,
               i.image_url,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
 
               c.id AS comment_id,
-              c.text AS comment_text,
+              c.comment_text AS comment_text,
               c.created_at AS comment_created_at,
               u_comment.username AS comment_author_username
 
@@ -134,7 +130,7 @@ def items_index():
 
 
 # -------------------------
-# SHOW ONE ITEM
+# SHOW ONE ITEM (+ COMMENTS)
 # -------------------------
 @items_blueprint.route("/items/<item_id>", methods=["GET"])
 def show_item(item_id):
@@ -146,16 +142,16 @@ def show_item(item_id):
             """
             SELECT
               i.id,
-              i.item_name,
+              i.name,
+              i.name AS item_name, -- compatibility
               i.description,
               i.image_url,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
 
               c.id AS comment_id,
-              c.text AS comment_text,
+              c.comment_text AS comment_text,
               c.created_at AS comment_created_at,
               u_comment.username AS comment_author_username
 
@@ -183,7 +179,7 @@ def show_item(item_id):
 
 
 # -------------------------
-# UPDATE ITEM (JSON)
+# UPDATE ITEM
 # -------------------------
 @items_blueprint.route("/items/<item_id>", methods=["PUT"])
 @token_required
@@ -191,13 +187,12 @@ def update_item(item_id):
     try:
         data = request.get_json(silent=True) or {}
 
-        item_name = data.get("item_name")
+        name = data.get("name") or data.get("item_name")
         description = data.get("description")
-        due_date = data.get("due_date")
         image_url = data.get("image_url")
 
-        if not item_name or not description:
-            return jsonify({"error": "item_name and description are required"}), 400
+        if not name or not description:
+            return jsonify({"error": "name and description are required"}), 400
 
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -216,14 +211,13 @@ def update_item(item_id):
         cursor.execute(
             """
             UPDATE items
-            SET item_name = %s,
+            SET name = %s,
                 description = %s,
-                due_date = %s,
                 image_url = %s
             WHERE id = %s
             RETURNING id;
             """,
-            (item_name, description, due_date, image_url, item_id),
+            (name, description, image_url, item_id),
         )
         updated_id = cursor.fetchone()["id"]
 
@@ -231,10 +225,10 @@ def update_item(item_id):
             """
             SELECT
               i.id,
-              i.item_name,
+              i.name,
+              i.name AS item_name, -- compatibility
               i.description,
               i.image_url,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -285,6 +279,7 @@ def delete_item(item_id):
 
     except Exception as error:
         return jsonify({"error": str(error)}), 500
+
 
 
 
