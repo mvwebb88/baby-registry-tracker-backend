@@ -1,33 +1,15 @@
-# Flask JWT Auth Template
+# Baby Registry API
 
-## About
+This repository contains the backend API for the Baby Registry full-stack application.
 
-This repo is a Flask JWT Auth template meant to be paired with a front-end app utilizing JWT authentication. It includes a basic user model, routes for user registration and login, and a JWT token generator.
+The API handles:
+- User authentication (JWT)
+- Registry item CRUD operations
+- Comment functionality
+- User-specific registry filtering
+- Due date personalization
 
-## Getting started
+For full project details, screenshots, and application demo, visit the front-end repository:
 
-Fork and clone this repository to your local machine.
+👉 https://github.com/mvwebb88/baby-registry-tracker-frontend
 
-After moving into the cloned directory, activate a new virtual environment:
-
-```bash
-pipenv shell
-```
-
-Install the dependencies:
-
-```bash
-pyenv sync
-```
-
-Run the Flask app:
-
-```bash
-python app.py
-```
-
-To deactivate the virtual environment when you're done, run:
-
-```bash
-exit
-```
