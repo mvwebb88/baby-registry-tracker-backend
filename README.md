@@ -1,4 +1,4 @@
-# Baby Registry API
+# Baby Registry Tracker
 
 This repository contains the backend API for the Baby Registry full-stack application.
 
