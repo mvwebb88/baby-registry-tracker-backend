@@ -76,6 +76,7 @@ def _get_request_data():
         v = _clean_text(value)
         return v if v in allowed else default
 
+    # FormData
     if "multipart/form-data" in content_type:
         item_name = request.form.get("item_name") or request.form.get("name")
         description = request.form.get("description")
@@ -104,7 +105,7 @@ def _get_request_data():
             "notes": notes,
         }
 
-    # Otherwise assume JSON
+    # JSON
     data = request.get_json(silent=True) or {}
 
     item_name = data.get("item_name") or data.get("name")
@@ -218,6 +219,7 @@ def create_item():
             """,
             (item_id,),
         )
+
         created_item = cursor.fetchone()
 
         connection.commit()
@@ -233,8 +235,11 @@ def create_item():
 # LIST ITEMS (+ COMMENTS)
 # -------------------------
 @items_blueprint.route("/items", methods=["GET"])
+@token_required
 def items_index():
     try:
+        user_id = g.user["id"]
+
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -268,8 +273,10 @@ def items_index():
             JOIN users u_item ON i.user_id = u_item.id
             LEFT JOIN comments c ON i.id = c.item_id
             LEFT JOIN users u_comment ON c.user_id = u_comment.id
+            WHERE i.user_id = %s
             ORDER BY i.created_at DESC, c.created_at ASC;
-            """
+            """,
+            (user_id,),
         )
 
         rows = cursor.fetchall()
@@ -286,8 +293,11 @@ def items_index():
 # SHOW ONE ITEM (+ COMMENTS)
 # -------------------------
 @items_blueprint.route("/items/<item_id>", methods=["GET"])
+@token_required
 def show_item(item_id):
     try:
+        user_id = g.user["id"]
+
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -321,10 +331,10 @@ def show_item(item_id):
             JOIN users u_item ON i.user_id = u_item.id
             LEFT JOIN comments c ON i.id = c.item_id
             LEFT JOIN users u_comment ON c.user_id = u_comment.id
-            WHERE i.id = %s
+            WHERE i.id = %s AND i.user_id = %s
             ORDER BY c.created_at ASC;
             """,
-            (item_id,),
+            (item_id, user_id),
         )
 
         rows = cursor.fetchall()
@@ -440,6 +450,7 @@ def update_item(item_id):
             """,
             (updated_id,),
         )
+
         updated_item = cursor.fetchone()
 
         connection.commit()
@@ -481,6 +492,7 @@ def delete_item(item_id):
 
     except Exception as error:
         return jsonify({"error": str(error)}), 500
+
 
 
 
