@@ -14,23 +14,19 @@ items_blueprint = Blueprint("items_blueprint", __name__)
 #
 # Supports:
 # - JSON requests (application/json)
-# - FormData requests (multipart/form-data) for forms (even if file upload is "later")
+# - FormData requests (multipart/form-data)
 #
-# DB tables (your local DB shows these columns on items):
-#   items:
-#     id, item_name, description, image_url, due_date, user_id, created_at,
-#     quantity, priority, category, store, price, status, link, notes
+# items columns (current):
+#   id, item_name, description, image_url, user_id, created_at,
+#   quantity, priority, category, store, price, status, link, notes
 #
 # NOTE:
 # - DB column is "item_name"
-# - Frontend may send "name" or "item_name" depending on version
-#   => we accept BOTH and return BOTH aliases to keep frontend stable
+# - Frontend may send "name" or "item_name"
+#   => we accept BOTH and return BOTH aliases
 # ============================================================
 
 
-# -------------------------
-# Helper: read input (JSON or FormData)
-# -------------------------
 def _get_request_data():
     """
     Returns a dict of input fields regardless of JSON vs FormData.
@@ -140,7 +136,7 @@ def _get_request_data():
 
 
 # -------------------------
-# CREATE ITEM (JSON or FormData)
+# CREATE ITEM
 # -------------------------
 @items_blueprint.route("/items", methods=["POST"])
 @token_required
@@ -213,7 +209,6 @@ def create_item():
               i.status,
               i.link,
               i.notes,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -260,7 +255,6 @@ def items_index():
               i.status,
               i.link,
               i.notes,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
@@ -314,7 +308,6 @@ def show_item(item_id):
               i.status,
               i.link,
               i.notes,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
@@ -348,7 +341,7 @@ def show_item(item_id):
 
 
 # -------------------------
-# UPDATE ITEM (JSON or FormData)
+# UPDATE ITEM
 # -------------------------
 @items_blueprint.route("/items/<item_id>", methods=["PUT"])
 @token_required
@@ -438,7 +431,6 @@ def update_item(item_id):
               i.status,
               i.link,
               i.notes,
-              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -489,6 +481,7 @@ def delete_item(item_id):
 
     except Exception as error:
         return jsonify({"error": str(error)}), 500
+
 
 
 
