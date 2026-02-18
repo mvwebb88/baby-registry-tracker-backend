@@ -24,12 +24,15 @@ CORS(
                 "http://127.0.0.1:5173",
                 "http://localhost:5174",
                 "http://127.0.0.1:5174",
-                "https://babyregistry.netlify.app",
-            ]
+                "https://babyregistry.netlify.app"
+            ],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
         }
     },
-    supports_credentials=True,
+    supports_credentials=True
 )
+
 
 # ✅ Register routes
 app.register_blueprint(authentication_blueprint)
