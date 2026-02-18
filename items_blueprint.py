@@ -12,19 +12,19 @@ items_blueprint = Blueprint("items_blueprint", __name__)
 # ============================================================
 # ITEMS API
 #
-# This version supports:
-# - JSON requests (fetch with JSON body)
-# - FormData requests (multipart/form-data), common when a form includes a file input
+# Supports:
+# - JSON requests (application/json)
+# - FormData requests (multipart/form-data) for forms (even if file upload is "later")
 #
-# DB tables (Heroku):
-#   users: id, username, password_digest, created_at
-#   items: id, name, description, image_url, user_id, created_at
-#   comments: id, comment_text, user_id, item_id, created_at
+# DB tables (your local DB shows these columns on items):
+#   items:
+#     id, item_name, description, image_url, due_date, user_id, created_at,
+#     quantity, priority, category, store, price, status, link, notes
 #
-# IMPORTANT:
-# - DB column is "name" (not "item_name")
-# - Frontend may still send "item_name"
-#   => we accept BOTH and return BOTH to keep frontend stable
+# NOTE:
+# - DB column is "item_name"
+# - Frontend may send "name" or "item_name" depending on version
+#   => we accept BOTH and return BOTH aliases to keep frontend stable
 # ============================================================
 
 
@@ -34,23 +34,109 @@ items_blueprint = Blueprint("items_blueprint", __name__)
 def _get_request_data():
     """
     Returns a dict of input fields regardless of JSON vs FormData.
-    Accepts both 'name' and legacy 'item_name'.
+    Accepts both 'item_name' and legacy 'name'.
+    Also accepts:
+      quantity, priority, category, store, price, status, link, notes
     """
-    # If multipart/form-data (common when file input exists)
     content_type = request.content_type or ""
 
+    PRIORITIES = {"Low", "Medium", "High"}
+    STATUSES = {"Needed", "Purchased"}
+    CATEGORIES = {
+        "Diapering",
+        "Feeding",
+        "Clothing",
+        "Nursery",
+        "Bath",
+        "Travel",
+        "Health & Safety",
+        "Toys",
+        "Other",
+    }
+
+    def _clean_text(value):
+        if value is None:
+            return None
+        s = str(value).strip()
+        return s if s != "" else None
+
+    def _clean_int(value, default=1):
+        try:
+            n = int(value)
+            return n if n >= 1 else default
+        except (TypeError, ValueError):
+            return default
+
+    def _clean_price(value):
+        if value is None or value == "":
+            return None
+        try:
+            p = float(value)
+            return p if p >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _clean_choice(value, allowed, default):
+        v = _clean_text(value)
+        return v if v in allowed else default
+
     if "multipart/form-data" in content_type:
-        name = request.form.get("name") or request.form.get("item_name")
+        item_name = request.form.get("item_name") or request.form.get("name")
         description = request.form.get("description")
         image_url = request.form.get("image_url")
-        return {"name": name, "description": description, "image_url": image_url}
+
+        quantity = _clean_int(request.form.get("quantity"), default=1)
+        priority = _clean_choice(request.form.get("priority"), PRIORITIES, "Medium")
+        category = _clean_choice(request.form.get("category"), CATEGORIES, "Other")
+        store = _clean_text(request.form.get("store"))
+        price = _clean_price(request.form.get("price"))
+        status = _clean_choice(request.form.get("status"), STATUSES, "Needed")
+        link = _clean_text(request.form.get("link"))
+        notes = _clean_text(request.form.get("notes"))
+
+        return {
+            "item_name": _clean_text(item_name),
+            "description": _clean_text(description),
+            "image_url": _clean_text(image_url),
+            "quantity": quantity,
+            "priority": priority,
+            "category": category,
+            "store": store,
+            "price": price,
+            "status": status,
+            "link": link,
+            "notes": notes,
+        }
 
     # Otherwise assume JSON
     data = request.get_json(silent=True) or {}
-    name = data.get("name") or data.get("item_name")
+
+    item_name = data.get("item_name") or data.get("name")
     description = data.get("description")
     image_url = data.get("image_url")
-    return {"name": name, "description": description, "image_url": image_url}
+
+    quantity = _clean_int(data.get("quantity"), default=1)
+    priority = _clean_choice(data.get("priority"), PRIORITIES, "Medium")
+    category = _clean_choice(data.get("category"), CATEGORIES, "Other")
+    store = _clean_text(data.get("store"))
+    price = _clean_price(data.get("price"))
+    status = _clean_choice(data.get("status"), STATUSES, "Needed")
+    link = _clean_text(data.get("link"))
+    notes = _clean_text(data.get("notes"))
+
+    return {
+        "item_name": _clean_text(item_name),
+        "description": _clean_text(description),
+        "image_url": _clean_text(image_url),
+        "quantity": quantity,
+        "priority": priority,
+        "category": category,
+        "store": store,
+        "price": price,
+        "status": status,
+        "link": link,
+        "notes": notes,
+    }
 
 
 # -------------------------
@@ -61,12 +147,22 @@ def _get_request_data():
 def create_item():
     try:
         data = _get_request_data()
-        name = data.get("name")
+
+        item_name = data.get("item_name")
         description = data.get("description")
         image_url = data.get("image_url")
 
-        if not name or not description:
-            return jsonify({"error": "name and description are required"}), 400
+        quantity = data.get("quantity", 1)
+        priority = data.get("priority", "Medium")
+        category = data.get("category", "Other")
+        store = data.get("store")
+        price = data.get("price")
+        status = data.get("status", "Needed")
+        link = data.get("link")
+        notes = data.get("notes")
+
+        if not item_name or not description:
+            return jsonify({"error": "item_name and description are required"}), 400
 
         user_id = g.user["id"]
 
@@ -75,11 +171,27 @@ def create_item():
 
         cursor.execute(
             """
-            INSERT INTO items (name, description, image_url, user_id, created_at)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO items
+              (item_name, description, image_url, quantity, priority, category, store, price, status, link, notes, user_id, created_at)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
             """,
-            (name, description, image_url, user_id, datetime.utcnow()),
+            (
+                item_name,
+                description,
+                image_url,
+                quantity,
+                priority,
+                category,
+                store,
+                price,
+                status,
+                link,
+                notes,
+                user_id,
+                datetime.utcnow(),
+            ),
         )
 
         item_id = cursor.fetchone()["id"]
@@ -88,10 +200,20 @@ def create_item():
             """
             SELECT
               i.id,
-              i.name,
-              i.name AS item_name,
+              i.item_name,
+              i.item_name AS name,
+              i.item_name AS item_name,
               i.description,
               i.image_url,
+              i.quantity,
+              i.priority,
+              i.category,
+              i.store,
+              i.price,
+              i.status,
+              i.link,
+              i.notes,
+              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -125,10 +247,20 @@ def items_index():
             """
             SELECT
               i.id,
-              i.name,
-              i.name AS item_name,
+              i.item_name,
+              i.item_name AS name,
+              i.item_name AS item_name,
               i.description,
               i.image_url,
+              i.quantity,
+              i.priority,
+              i.category,
+              i.store,
+              i.price,
+              i.status,
+              i.link,
+              i.notes,
+              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
@@ -169,10 +301,20 @@ def show_item(item_id):
             """
             SELECT
               i.id,
-              i.name,
-              i.name AS item_name,
+              i.item_name,
+              i.item_name AS name,
+              i.item_name AS item_name,
               i.description,
               i.image_url,
+              i.quantity,
+              i.priority,
+              i.category,
+              i.store,
+              i.price,
+              i.status,
+              i.link,
+              i.notes,
+              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u_item.username AS owner_username,
@@ -213,12 +355,22 @@ def show_item(item_id):
 def update_item(item_id):
     try:
         data = _get_request_data()
-        name = data.get("name")
+
+        item_name = data.get("item_name")
         description = data.get("description")
         image_url = data.get("image_url")
 
-        if not name or not description:
-            return jsonify({"error": "name and description are required"}), 400
+        quantity = data.get("quantity", 1)
+        priority = data.get("priority", "Medium")
+        category = data.get("category", "Other")
+        store = data.get("store")
+        price = data.get("price")
+        status = data.get("status", "Needed")
+        link = data.get("link")
+        notes = data.get("notes")
+
+        if not item_name or not description:
+            return jsonify({"error": "item_name and description are required"}), 400
 
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -237,24 +389,56 @@ def update_item(item_id):
         cursor.execute(
             """
             UPDATE items
-            SET name = %s,
+            SET item_name = %s,
                 description = %s,
-                image_url = %s
+                image_url = %s,
+                quantity = %s,
+                priority = %s,
+                category = %s,
+                store = %s,
+                price = %s,
+                status = %s,
+                link = %s,
+                notes = %s
             WHERE id = %s
             RETURNING id;
             """,
-            (name, description, image_url, item_id),
+            (
+                item_name,
+                description,
+                image_url,
+                quantity,
+                priority,
+                category,
+                store,
+                price,
+                status,
+                link,
+                notes,
+                item_id,
+            ),
         )
+
         updated_id = cursor.fetchone()["id"]
 
         cursor.execute(
             """
             SELECT
               i.id,
-              i.name,
-              i.name AS item_name,
+              i.item_name,
+              i.item_name AS name,
+              i.item_name AS item_name,
               i.description,
               i.image_url,
+              i.quantity,
+              i.priority,
+              i.category,
+              i.store,
+              i.price,
+              i.status,
+              i.link,
+              i.notes,
+              i.due_date,
               i.created_at,
               i.user_id AS item_owner_id,
               u.username AS owner_username
@@ -301,11 +485,11 @@ def delete_item(item_id):
         connection.commit()
         connection.close()
 
-        # return deleted item info (optional)
         return jsonify(item), 200
 
     except Exception as error:
         return jsonify({"error": str(error)}), 500
+
 
 
 
